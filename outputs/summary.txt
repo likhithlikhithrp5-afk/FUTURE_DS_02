@@ -1,0 +1,7 @@
+Overall churn rate: 0.377
+Highest churn plan: Free
+Highest churn region: Africa
+Lowest engagement churn: 0.46
+Average monthly spend: 35.15
+Average tenure days: 382.2
+Average support tickets: 1.81
