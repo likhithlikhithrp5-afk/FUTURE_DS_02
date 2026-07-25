@@ -1,53 +1,77 @@
 import csv
+import json
 import os
 import random
+import zipfile
 from collections import defaultdict
 from datetime import date, timedelta
-from math import ceil
+from xml.sax.saxutils import escape
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), 'sales_data.csv')
-SUMMARY_FILE = os.path.join(os.path.dirname(__file__), 'sales_summary.txt')
-HTML_FILE = os.path.join(os.path.dirname(__file__), 'sales_dashboard.html')
+import matplotlib
 
-REGIONS = ['North', 'South', 'East', 'West']
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
+
+
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DASHBOARD_DIR = os.path.join(BASE_DIR, "dashboard")
+OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+
+LEGACY_CSV_FILE = os.path.join(BASE_DIR, "sales_data.csv")
+LEGACY_XLSX_FILE = os.path.join(BASE_DIR, "sales_data.xlsx")
+LEGACY_HTML_FILE = os.path.join(BASE_DIR, "sales_dashboard.html")
+
+CSV_FILE = os.path.join(DATA_DIR, "sales_data.csv")
+XLSX_FILE = os.path.join(DATA_DIR, "sales_data.xlsx")
+SUMMARY_FILE = os.path.join(BASE_DIR, "sales_summary.txt")
+HTML_FILE = os.path.join(DASHBOARD_DIR, "sales_dashboard.html")
+
+REGIONS = ["North", "South", "East", "West"]
 CATEGORIES = [
     {
-        'name': 'Electronics',
-        'products': [
-            ('Laptop', 899, 0.28),
-            ('Smartphone', 699, 0.33),
-            ('Tablet', 499, 0.29),
-            ('Headphones', 149, 0.37),
+        "name": "Electronics",
+        "products": [
+            ("Laptop", 899, 0.28),
+            ("Smartphone", 699, 0.33),
+            ("Tablet", 499, 0.29),
+            ("Headphones", 149, 0.37),
         ],
     },
     {
-        'name': 'Home & Kitchen',
-        'products': [
-            ('Blender', 89, 0.31),
-            ('Coffee Maker', 129, 0.34),
-            ('Air Fryer', 149, 0.30),
-            ('Lamp', 59, 0.27),
+        "name": "Home & Kitchen",
+        "products": [
+            ("Blender", 89, 0.31),
+            ("Coffee Maker", 129, 0.34),
+            ("Air Fryer", 149, 0.30),
+            ("Lamp", 59, 0.27),
         ],
     },
     {
-        'name': 'Fashion',
-        'products': [
-            ('Shoes', 119, 0.26),
-            ('Backpack', 79, 0.24),
-            ('Jacket', 159, 0.29),
-            ('Watch', 219, 0.32),
+        "name": "Fashion",
+        "products": [
+            ("Shoes", 119, 0.26),
+            ("Backpack", 79, 0.24),
+            ("Jacket", 159, 0.29),
+            ("Watch", 219, 0.32),
         ],
     },
     {
-        'name': 'Health & Beauty',
-        'products': [
-            ('Skincare Kit', 69, 0.35),
-            ('Hair Dryer', 99, 0.30),
-            ('Perfume', 89, 0.33),
-            ('Vitamin Pack', 39, 0.28),
+        "name": "Health & Beauty",
+        "products": [
+            ("Skincare Kit", 69, 0.35),
+            ("Hair Dryer", 99, 0.30),
+            ("Perfume", 89, 0.33),
+            ("Vitamin Pack", 39, 0.28),
         ],
     },
 ]
+
+
+def ensure_dirs():
+    for folder in (DATA_DIR, DASHBOARD_DIR, OUTPUTS_DIR):
+        os.makedirs(folder, exist_ok=True)
 
 
 def generate_sales_data(rows=500):
@@ -55,237 +79,586 @@ def generate_sales_data(rows=500):
     start_date = date(2024, 1, 1)
     end_date = date(2025, 6, 30)
     data = []
-    for _ in range(rows):
+
+    for index in range(rows):
         order_date = start_date + timedelta(days=rng.randint(0, (end_date - start_date).days))
         region = rng.choice(REGIONS)
         category = rng.choice(CATEGORIES)
-        product_name, base_price, margin = rng.choice(category['products'])
+        product_name, base_price, margin = rng.choice(category["products"])
 
-        qty = rng.randint(1, 5)
+        quantity = rng.randint(1, 5)
         month_factor = 1.0 + (order_date.month % 6) * 0.03
-        region_factor = {'North': 1.03, 'South': 0.97, 'East': 1.01, 'West': 1.08}[region]
-        category_factor = {'Electronics': 1.08, 'Home & Kitchen': 0.95, 'Fashion': 1.02, 'Health & Beauty': 1.00}[category['name']]
+        region_factor = {"North": 1.03, "South": 0.97, "East": 1.01, "West": 1.08}[region]
+        category_factor = {
+            "Electronics": 1.08,
+            "Home & Kitchen": 0.95,
+            "Fashion": 1.02,
+            "Health & Beauty": 1.00,
+        }[category["name"]]
         discount_factor = 1 - (rng.random() * 0.08)
-        revenue = round(qty * base_price * month_factor * region_factor * category_factor * discount_factor, 2)
+        revenue = round(quantity * base_price * month_factor * region_factor * category_factor * discount_factor, 2)
         cost = round(revenue * (1 - margin), 2)
         profit = round(revenue - cost, 2)
-        data.append({
-            'Order ID': f'ORD-{1000 + _}',
-            'Order Date': order_date.strftime('%Y-%m-%d'),
-            'Region': region,
-            'Category': category['name'],
-            'Product': product_name,
-            'Quantity': qty,
-            'Unit Price': round(base_price, 2),
-            'Revenue': revenue,
-            'Cost': cost,
-            'Profit': profit,
-        })
+
+        data.append(
+            {
+                "Order ID": f"ORD-{1000 + index}",
+                "Order Date": order_date.strftime("%Y-%m-%d"),
+                "Region": region,
+                "Category": category["name"],
+                "Product": product_name,
+                "Quantity": quantity,
+                "Unit Price": round(base_price, 2),
+                "Revenue": revenue,
+                "Cost": cost,
+                "Profit": profit,
+            }
+        )
+
     return data
 
 
-def write_csv(rows):
-    fieldnames = ['Order ID', 'Order Date', 'Region', 'Category', 'Product', 'Quantity', 'Unit Price', 'Revenue', 'Cost', 'Profit']
-    with open(DATA_FILE, 'w', newline='', encoding='utf-8') as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+def write_data_files(rows):
+    fieldnames = [
+        "Order ID",
+        "Order Date",
+        "Region",
+        "Category",
+        "Product",
+        "Quantity",
+        "Unit Price",
+        "Revenue",
+        "Cost",
+        "Profit",
+    ]
+
+    for path in (CSV_FILE, LEGACY_CSV_FILE):
+        with open(path, "w", newline="", encoding="utf-8") as file_handle:
+            writer = csv.DictWriter(file_handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    df = pd.DataFrame(rows)
+    write_simple_xlsx(df, XLSX_FILE)
+    write_simple_xlsx(df, LEGACY_XLSX_FILE)
+    return df
 
 
-def summarize(rows):
-    total_revenue = round(sum(r['Revenue'] for r in rows), 2)
-    total_profit = round(sum(r['Profit'] for r in rows), 2)
-    total_orders = len(rows)
-    avg_order_value = round(total_revenue / total_orders, 2)
-
-    monthly = defaultdict(float)
-    for item in rows:
-        month = item['Order Date'][:7]
-        monthly[month] += item['Revenue']
-    monthly_sorted = sorted(monthly.items())
-
-    product_revenue = defaultdict(float)
-    product_profit = defaultdict(float)
-    for item in rows:
-        product_revenue[item['Product']] += item['Revenue']
-        product_profit[item['Product']] += item['Profit']
-    top_products = sorted(product_revenue.items(), key=lambda x: x[1], reverse=True)[:5]
-
-    region_revenue = defaultdict(float)
-    region_profit = defaultdict(float)
-    for item in rows:
-        region_revenue[item['Region']] += item['Revenue']
-        region_profit[item['Region']] += item['Profit']
-    top_regions = sorted(region_revenue.items(), key=lambda x: x[1], reverse=True)[:3]
-
-    category_revenue = defaultdict(float)
-    category_profit = defaultdict(float)
-    for item in rows:
-        category_revenue[item['Category']] += item['Revenue']
-        category_profit[item['Category']] += item['Profit']
-    top_categories = sorted(category_revenue.items(), key=lambda x: x[1], reverse=True)[:3]
-
-    insights = []
-    insights.append('Business Sales Performance Summary')
-    insights.append('')
-    insights.append(f'Total Revenue: ${total_revenue:,.2f}')
-    insights.append(f'Total Profit: ${total_profit:,.2f}')
-    insights.append(f'Number of Orders: {total_orders}')
-    insights.append(f'Average Order Value: ${avg_order_value:,.2f}')
-    insights.append('')
-    insights.append('Monthly Revenue Trend:')
-    for month, value in monthly_sorted:
-        insights.append(f'- {month}: ${value:,.2f}')
-    insights.append('')
-    insights.append('Top Products by Revenue:')
-    for product, value in top_products:
-        insights.append(f'- {product}: ${value:,.2f} revenue, ${product_profit[product]:,.2f} profit')
-    insights.append('')
-    insights.append('Top Regions by Revenue:')
-    for region, value in top_regions:
-        insights.append(f'- {region}: ${value:,.2f} revenue, ${region_profit[region]:,.2f} profit')
-    insights.append('')
-    insights.append('Top Categories by Revenue:')
-    for category, value in top_categories:
-        insights.append(f'- {category}: ${value:,.2f} revenue, ${category_profit[category]:,.2f} profit')
-    insights.append('')
-    insights.append('Recommended Actions:')
-    insights.append('- Increase inventory for the highest-revenue products to avoid stockouts during peak demand.')
-    insights.append('- Focus marketing spend on the West and North regions, where revenue growth is strongest.')
-    insights.append('- Promote Electronics and Fashion bundles to lift average order value and overall margins.')
-    return insights
+def excel_column_name(index):
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
 
 
-def build_dashboard(rows, summary_lines):
-    # Monthly values
-    monthly = defaultdict(float)
-    for item in rows:
-        monthly[item['Order Date'][:7]] += item['Revenue']
-    month_labels = sorted(monthly.keys())
-    month_values = [monthly[m] for m in month_labels]
+def xlsx_cell(value, row_index, column_index):
+    ref = f"{excel_column_name(column_index)}{row_index}"
+    if isinstance(value, (int, float)):
+        return f'<c r="{ref}"><v>{value}</v></c>'
+    return f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
 
-    # Top products
-    product_revenue = defaultdict(float)
-    for item in rows:
-        product_revenue[item['Product']] += item['Revenue']
-    top_products = sorted(product_revenue.items(), key=lambda x: x[1], reverse=True)[:5]
-    prod_labels = [p[0] for p in top_products]
-    prod_values = [p[1] for p in top_products]
 
-    def svg_line_chart(labels, values, width=540, height=260):
-        max_value = max(values) if values else 1
-        min_value = 0
-        margin_left = 50
-        margin_right = 20
-        margin_top = 20
-        margin_bottom = 40
-        chart_width = width - margin_left - margin_right
-        chart_height = height - margin_top - margin_bottom
-        points = []
-        for i, val in enumerate(values):
-            x = margin_left + (i / max(1, len(values) - 1)) * chart_width if len(values) > 1 else width / 2
-            y = margin_top + chart_height - ((val - min_value) / max_value) * chart_height
-            points.append((x, y))
-        path = 'M ' + ' L '.join(f'{x:.1f},{y:.1f}' for x, y in points)
-        grid_lines = []
-        for step in range(4):
-            y = margin_top + (chart_height / 3) * step
-            grid_lines.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#e5e7eb" stroke-width="1" />')
-        x_labels = []
-        for i, label in enumerate(labels):
-            x = margin_left + (i / max(1, len(labels) - 1)) * chart_width if len(labels) > 1 else width / 2
-            x_labels.append(f'<text x="{x:.1f}" y="{height - 12}" text-anchor="middle" font-size="10">{label}</text>')
-        return f'''<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">
-            <rect width="100%" height="100%" fill="#ffffff" />
-            <text x="20" y="18" font-size="16" font-weight="600" fill="#0f172a">Monthly Revenue Trend</text>
-            {''.join(grid_lines)}
-            <path d="{path}" fill="none" stroke="#2563eb" stroke-width="3" />
-            {''.join(x_labels)}
-        </svg>'''
+def write_simple_xlsx(df, path):
+    headers = list(df.columns)
+    rows_xml = []
+    rows_xml.append(
+        '<row r="1">' + "".join(xlsx_cell(header, 1, column_index + 1) for column_index, header in enumerate(headers)) + "</row>"
+    )
+    for row_index, (_, row) in enumerate(df.iterrows(), start=2):
+        rows_xml.append(
+            f'<row r="{row_index}">'
+            + "".join(xlsx_cell(row[header], row_index, column_index + 1) for column_index, header in enumerate(headers))
+            + "</row>"
+        )
 
-    def svg_bar_chart(labels, values, width=540, height=260):
-        max_value = max(values) if values else 1
-        margin_left = 50
-        margin_right = 20
-        margin_top = 20
-        margin_bottom = 70
-        chart_width = width - margin_left - margin_right
-        chart_height = height - margin_top - margin_bottom
-        bar_width = chart_width / max(1, len(labels)) - 20
-        bars = []
-        for i, (label, val) in enumerate(zip(labels, values)):
-            x = margin_left + (i * (chart_width / len(labels))) + 10
-            h = (val / max_value) * chart_height
-            y = margin_top + chart_height - h
-            bars.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{h:.1f}" fill="#10b981" />')
-            bars.append(f'<text x="{x + bar_width/2:.1f}" y="{height - 20}" text-anchor="middle" font-size="10">{label}</text>')
-        return f'''<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">
-            <rect width="100%" height="100%" fill="#ffffff" />
-            <text x="20" y="18" font-size="16" font-weight="600" fill="#0f172a">Top Products by Revenue</text>
-            {''.join(bars)}
-        </svg>'''
+    sheet_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{''.join(rows_xml)}</sheetData>
+</worksheet>'''
+    workbook_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sales Data" sheetId="1" r:id="rId1"/></sheets>
+</workbook>'''
+    workbook_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>'''
+    content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>'''
 
-    monthly_svg = svg_line_chart(month_labels, month_values)
-    product_svg = svg_bar_chart(prod_labels, prod_values)
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as workbook:
+        workbook.writestr("[Content_Types].xml", content_types)
+        workbook.writestr("_rels/.rels", root_rels)
+        workbook.writestr("xl/workbook.xml", workbook_xml)
+        workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        workbook.writestr("xl/worksheets/sheet1.xml", sheet_xml)
 
-    summary_html = '\n'.join(summary_lines)
-    html = f'''<!DOCTYPE html>
+
+def format_currency(value):
+    return f"${value:,.2f}"
+
+
+def aggregate_metrics(df):
+    monthly = (
+        df.assign(Month=df["Order Date"].dt.to_period("M").astype(str))
+        .groupby("Month", as_index=False)["Revenue"]
+        .sum()
+        .sort_values("Month")
+    )
+    product = (
+        df.groupby("Product", as_index=False)[["Revenue", "Profit"]]
+        .sum()
+        .sort_values("Revenue", ascending=False)
+    )
+    category = (
+        df.groupby("Category", as_index=False)[["Revenue", "Profit"]]
+        .sum()
+        .sort_values("Revenue", ascending=False)
+    )
+    region = (
+        df.groupby("Region", as_index=False)[["Revenue", "Profit"]]
+        .sum()
+        .sort_values("Revenue", ascending=False)
+    )
+
+    return {
+        "total_revenue": float(df["Revenue"].sum()),
+        "total_profit": float(df["Profit"].sum()),
+        "orders": int(len(df)),
+        "aov": float(df["Revenue"].sum() / len(df)),
+        "profit_margin": float(df["Profit"].sum() / df["Revenue"].sum()),
+        "monthly": monthly,
+        "product": product,
+        "category": category,
+        "region": region,
+    }
+
+
+def write_summary(metrics):
+    top_category = metrics["category"].iloc[0]
+    top_region = metrics["region"].iloc[0]
+    top_product = metrics["product"].iloc[0]
+    category_share = top_category["Revenue"] / metrics["total_revenue"]
+    region_share = top_region["Revenue"] / metrics["total_revenue"]
+    weakest_category = metrics["category"].iloc[-1]
+
+    lines = [
+        "Business Sales Performance Summary",
+        "",
+        f"Total Revenue: {format_currency(metrics['total_revenue'])}",
+        f"Total Profit: {format_currency(metrics['total_profit'])}",
+        f"Number of Orders: {metrics['orders']}",
+        f"Average Order Value: {format_currency(metrics['aov'])}",
+        f"Overall Profit Margin: {metrics['profit_margin']:.1%}",
+        "",
+        "Monthly Revenue Trend:",
+    ]
+
+    for _, row in metrics["monthly"].iterrows():
+        lines.append(f"- {row['Month']}: {format_currency(row['Revenue'])}")
+
+    lines.extend(["", "Top Products by Revenue:"])
+    for _, row in metrics["product"].head(5).iterrows():
+        lines.append(f"- {row['Product']}: {format_currency(row['Revenue'])} revenue, {format_currency(row['Profit'])} profit")
+
+    lines.extend(["", "Top Regions by Revenue:"])
+    for _, row in metrics["region"].iterrows():
+        lines.append(f"- {row['Region']}: {format_currency(row['Revenue'])} revenue, {format_currency(row['Profit'])} profit")
+
+    lines.extend(["", "Top Categories by Revenue:"])
+    for _, row in metrics["category"].iterrows():
+        lines.append(f"- {row['Category']}: {format_currency(row['Revenue'])} revenue, {format_currency(row['Profit'])} profit")
+
+    lines.extend(
+        [
+            "",
+            "Business Insights:",
+            f"- {top_category['Category']} is the strongest category, producing {category_share:.1%} of total revenue and {format_currency(top_category['Profit'])} in profit.",
+            f"- {top_region['Region']} is the leading region with {region_share:.1%} revenue share, making it the best candidate for expansion and retention campaigns.",
+            f"- {top_product['Product']} is the highest-value product and should receive priority inventory planning before peak sales months.",
+            f"- {weakest_category['Category']} trails the portfolio and needs targeted promotions, bundles, or pricing tests to increase contribution.",
+            "",
+            "Recommended Actions:",
+            "- Protect inventory and advertising budget for the highest-revenue products to avoid stockouts during demand spikes.",
+            "- Prioritize East and South regional campaigns because they currently generate the highest revenue base.",
+            "- Build Electronics-led bundles with Fashion and Health & Beauty add-ons to lift average order value.",
+            "- Run promotional experiments for Home & Kitchen to improve revenue contribution without over-discounting profitable items.",
+        ]
+    )
+
+    with open(SUMMARY_FILE, "w", encoding="utf-8") as file_handle:
+        file_handle.write("\n".join(lines))
+
+    return lines
+
+
+def save_chart_images(metrics):
+    plt.style.use("seaborn-v0_8-whitegrid")
+
+    fig, ax = plt.subplots(figsize=(10, 4.8))
+    ax.plot(metrics["monthly"]["Month"], metrics["monthly"]["Revenue"], color="#2563eb", linewidth=2.8, marker="o")
+    ax.set_title("Monthly Revenue Trend", loc="left", fontsize=15, weight="bold")
+    ax.set_ylabel("Revenue")
+    ax.tick_params(axis="x", rotation=45)
+    ax.yaxis.set_major_formatter("${x:,.0f}")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUTS_DIR, "revenue_trend.png"), dpi=160)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    top_products = metrics["product"].head(8).sort_values("Revenue")
+    ax.barh(top_products["Product"], top_products["Revenue"], color="#0f766e")
+    ax.set_title("Top Products by Revenue", loc="left", fontsize=15, weight="bold")
+    ax.xaxis.set_major_formatter("${x:,.0f}")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUTS_DIR, "product_analysis.png"), dpi=160)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    category = metrics["category"].sort_values("Revenue")
+    ax.barh(category["Category"], category["Revenue"], color="#7c3aed", label="Revenue")
+    ax.barh(category["Category"], category["Profit"], color="#f59e0b", label="Profit")
+    ax.set_title("Revenue and Profit by Category", loc="left", fontsize=15, weight="bold")
+    ax.xaxis.set_major_formatter("${x:,.0f}")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUTS_DIR, "category_analysis.png"), dpi=160)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    region = metrics["region"].sort_values("Revenue")
+    ax.barh(region["Region"], region["Revenue"], color="#dc2626")
+    ax.set_title("Revenue by Region", loc="left", fontsize=15, weight="bold")
+    ax.xaxis.set_major_formatter("${x:,.0f}")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUTS_DIR, "region_analysis.png"), dpi=160)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(12, 7), facecolor="#f8fafc")
+    fig.suptitle("Business Sales Performance Dashboard", x=0.05, y=0.96, ha="left", fontsize=20, weight="bold")
+    cards = [
+        ("Total Revenue", format_currency(metrics["total_revenue"])),
+        ("Total Profit", format_currency(metrics["total_profit"])),
+        ("Orders", f"{metrics['orders']:,}"),
+        ("Average Order Value", format_currency(metrics["aov"])),
+    ]
+    for index, (label, value) in enumerate(cards):
+        ax = fig.add_axes([0.05 + index * 0.235, 0.76, 0.2, 0.13])
+        ax.set_facecolor("white")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.text(0.05, 0.68, label, transform=ax.transAxes, fontsize=10, color="#475569")
+        ax.text(0.05, 0.23, value, transform=ax.transAxes, fontsize=18, weight="bold", color="#0f172a")
+
+    ax1 = fig.add_axes([0.06, 0.12, 0.53, 0.52])
+    ax1.plot(metrics["monthly"]["Month"], metrics["monthly"]["Revenue"], color="#2563eb", linewidth=2.5)
+    ax1.set_title("Monthly Revenue Trend", loc="left", weight="bold")
+    ax1.tick_params(axis="x", rotation=45, labelsize=8)
+    ax1.yaxis.set_major_formatter("${x:,.0f}")
+
+    ax2 = fig.add_axes([0.66, 0.12, 0.29, 0.52])
+    top_products = metrics["product"].head(6).sort_values("Revenue")
+    ax2.barh(top_products["Product"], top_products["Revenue"], color="#0f766e")
+    ax2.set_title("Top Products", loc="left", weight="bold")
+    ax2.xaxis.set_major_formatter("${x:,.0f}")
+
+    fig.savefig(os.path.join(OUTPUTS_DIR, "dashboard_screenshot.png"), dpi=160)
+    plt.close(fig)
+
+
+def build_dashboard_html(df, metrics, summary_lines):
+    records = df.copy()
+    records["Order Date"] = records["Order Date"].dt.strftime("%Y-%m-%d")
+    payload = json.dumps(records.to_dict(orient="records"))
+    summary_html = "\n".join(summary_lines)
+
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sales Performance Dashboard</title>
+  <title>Business Sales Performance Dashboard</title>
   <style>
-    body {{ font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }}
-    .card {{ background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 20px; margin-bottom: 20px; }}
-    .metrics {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
-    .metric {{ background: #eff6ff; border-radius: 10px; padding: 12px; }}
-    .metric h3 {{ font-size: 13px; color: #475569; margin: 0 0 6px; }}
-    .metric p {{ font-size: 20px; margin: 0; font-weight: 700; color: #1d4ed8; }}
-    .chart-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
-    pre {{ white-space: pre-wrap; background: #f8fafc; padding: 16px; border-radius: 8px; }}
-    @media (max-width: 900px) {{ .metrics, .chart-grid {{ grid-template-columns: 1fr; }} }}
+    :root {{
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --ink: #101828;
+      --muted: #667085;
+      --line: #d9e0ea;
+      --blue: #2563eb;
+      --teal: #0f766e;
+      --orange: #ea580c;
+      --rose: #be123c;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }}
+    header {{
+      padding: 24px 32px 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }}
+    h1 {{ margin: 0 0 6px; font-size: 30px; letter-spacing: 0; }}
+    header p {{ margin: 0; color: var(--muted); max-width: 960px; line-height: 1.5; }}
+    main {{ padding: 20px 32px 32px; }}
+    .filters, .kpis, .grid, .story-grid {{ display: grid; gap: 14px; }}
+    .filters {{ grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr; margin-bottom: 16px; }}
+    .filter, .kpi, .panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }}
+    label {{ display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }}
+    select, input {{
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--ink);
+    }}
+    .kpis {{ grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 16px; }}
+    .kpi span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }}
+    .kpi strong {{ display: block; margin-top: 8px; font-size: 24px; }}
+    .grid {{ grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.9fr); margin-bottom: 16px; }}
+    .story-grid {{ grid-template-columns: 1fr 1fr; }}
+    .panel h2 {{ margin: 0 0 12px; font-size: 17px; }}
+    svg {{ width: 100%; height: 330px; display: block; }}
+    .bar-label {{ font-size: 12px; fill: var(--ink); }}
+    .axis {{ stroke: var(--line); stroke-width: 1; }}
+    .table-wrap {{ overflow-x: auto; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    th, td {{ padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }}
+    th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; }}
+    pre {{
+      margin: 0;
+      white-space: pre-wrap;
+      color: #344054;
+      font-family: inherit;
+      line-height: 1.55;
+    }}
+    @media (max-width: 980px) {{
+      header, main {{ padding-left: 18px; padding-right: 18px; }}
+      .filters, .kpis, .grid, .story-grid {{ grid-template-columns: 1fr; }}
+      svg {{ height: 300px; }}
+    }}
   </style>
 </head>
 <body>
-  <h1>Business Sales Performance Dashboard</h1>
-  <p>This is a client-ready analysis based on a simple self-created sales dataset that matches the task requirements.</p>
-  <div class="card">
-    <div class="metrics">
-      <div class="metric"><h3>Total Revenue</h3><p>${sum(r['Revenue'] for r in rows):,.2f}</p></div>
-      <div class="metric"><h3>Total Profit</h3><p>${sum(r['Profit'] for r in rows):,.2f}</p></div>
-      <div class="metric"><h3>Orders</h3><p>{len(rows)}</p></div>
-      <div class="metric"><h3>Avg. Order Value</h3><p>${round(sum(r['Revenue'] for r in rows)/len(rows),2):,.2f}</p></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="chart-grid">
-      <div>{monthly_svg}</div>
-      <div>{product_svg}</div>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Executive Summary</h2>
-    <pre>{summary_html}</pre>
-  </div>
+  <header>
+    <h1>Business Sales Performance Dashboard</h1>
+    <p>Interactive sales analytics report with KPI cards, trend analysis, regional and category performance, and business recommendations for Future Interns Task 1.</p>
+  </header>
+  <main>
+    <section class="filters" aria-label="Dashboard filters">
+      <div class="filter"><label for="regionFilter">Region</label><select id="regionFilter"><option value="All">All Regions</option></select></div>
+      <div class="filter"><label for="categoryFilter">Category</label><select id="categoryFilter"><option value="All">All Categories</option></select></div>
+      <div class="filter"><label for="productFilter">Product</label><select id="productFilter"><option value="All">All Products</option></select></div>
+      <div class="filter"><label for="startDate">Start Date</label><input id="startDate" type="date" /></div>
+      <div class="filter"><label for="endDate">End Date</label><input id="endDate" type="date" /></div>
+    </section>
+
+    <section class="kpis" aria-label="Key performance indicators">
+      <div class="kpi"><span>Total Revenue</span><strong id="kpiRevenue"></strong></div>
+      <div class="kpi"><span>Total Profit</span><strong id="kpiProfit"></strong></div>
+      <div class="kpi"><span>Orders</span><strong id="kpiOrders"></strong></div>
+      <div class="kpi"><span>Average Order Value</span><strong id="kpiAov"></strong></div>
+      <div class="kpi"><span>Profit Margin</span><strong id="kpiMargin"></strong></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel"><h2>Monthly Revenue Trend</h2><svg id="trendChart" role="img"></svg></div>
+      <div class="panel"><h2>Revenue by Product</h2><svg id="productChart" role="img"></svg></div>
+    </section>
+
+    <section class="story-grid">
+      <div class="panel"><h2>Revenue and Profit by Category</h2><svg id="categoryChart" role="img"></svg></div>
+      <div class="panel"><h2>Revenue by Region</h2><svg id="regionChart" role="img"></svg></div>
+    </section>
+
+    <section class="grid" style="margin-top:16px;">
+      <div class="panel table-wrap"><h2>Top Records</h2><table><thead><tr><th>Order</th><th>Date</th><th>Region</th><th>Category</th><th>Product</th><th>Revenue</th><th>Profit</th></tr></thead><tbody id="recordRows"></tbody></table></div>
+      <div class="panel"><h2>Executive Story</h2><pre>{summary_html}</pre></div>
+    </section>
+  </main>
+
+  <script>
+    const salesData = {payload};
+    const currency = new Intl.NumberFormat("en-US", {{ style: "currency", currency: "USD", maximumFractionDigits: 0 }});
+    const preciseCurrency = new Intl.NumberFormat("en-US", {{ style: "currency", currency: "USD" }});
+
+    function uniqueValues(field) {{
+      return [...new Set(salesData.map(row => row[field]))].sort();
+    }}
+
+    function fillSelect(id, values) {{
+      const select = document.getElementById(id);
+      values.forEach(value => {{
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      }});
+    }}
+
+    function sum(rows, field) {{
+      return rows.reduce((total, row) => total + Number(row[field]), 0);
+    }}
+
+    function groupBy(rows, key, valueField) {{
+      const grouped = new Map();
+      rows.forEach(row => grouped.set(row[key], (grouped.get(row[key]) || 0) + Number(row[valueField])));
+      return [...grouped.entries()].map(([label, value]) => ({{ label, value }})).sort((a, b) => b.value - a.value);
+    }}
+
+    function groupCategory(rows) {{
+      const grouped = new Map();
+      rows.forEach(row => {{
+        const current = grouped.get(row.Category) || {{ label: row.Category, revenue: 0, profit: 0 }};
+        current.revenue += Number(row.Revenue);
+        current.profit += Number(row.Profit);
+        grouped.set(row.Category, current);
+      }});
+      return [...grouped.values()].sort((a, b) => b.revenue - a.revenue);
+    }}
+
+    function filterRows() {{
+      const region = document.getElementById("regionFilter").value;
+      const category = document.getElementById("categoryFilter").value;
+      const product = document.getElementById("productFilter").value;
+      const startDate = document.getElementById("startDate").value;
+      const endDate = document.getElementById("endDate").value;
+      return salesData.filter(row =>
+        (region === "All" || row.Region === region) &&
+        (category === "All" || row.Category === category) &&
+        (product === "All" || row.Product === product) &&
+        (!startDate || row["Order Date"] >= startDate) &&
+        (!endDate || row["Order Date"] <= endDate)
+      );
+    }}
+
+    function drawLineChart(id, rows) {{
+      const monthlyMap = new Map();
+      rows.forEach(row => {{
+        const month = row["Order Date"].slice(0, 7);
+        monthlyMap.set(month, (monthlyMap.get(month) || 0) + Number(row.Revenue));
+      }});
+      const data = [...monthlyMap.entries()].sort().map(([label, value]) => ({{ label, value }}));
+      const svg = document.getElementById(id);
+      const width = 780, height = 330, left = 58, right = 22, top = 18, bottom = 54;
+      const chartWidth = width - left - right;
+      const chartHeight = height - top - bottom;
+      const max = Math.max(...data.map(d => d.value), 1);
+      const points = data.map((d, i) => {{
+        const x = left + (data.length <= 1 ? chartWidth / 2 : i * chartWidth / (data.length - 1));
+        const y = top + chartHeight - (d.value / max) * chartHeight;
+        return [x, y, d.label, d.value];
+      }});
+      const path = points.map((p, i) => `${{i === 0 ? "M" : "L"}} ${{p[0]}},${{p[1]}}`).join(" ");
+      svg.setAttribute("viewBox", `0 0 ${{width}} ${{height}}`);
+      svg.innerHTML = `
+        <line class="axis" x1="${{left}}" y1="${{top + chartHeight}}" x2="${{width - right}}" y2="${{top + chartHeight}}"></line>
+        ${{[0, .25, .5, .75, 1].map(t => `<line class="axis" x1="${{left}}" y1="${{top + chartHeight - chartHeight * t}}" x2="${{width - right}}" y2="${{top + chartHeight - chartHeight * t}}"></line>`).join("")}}
+        <path d="${{path}}" fill="none" stroke="#2563eb" stroke-width="4"></path>
+        ${{points.map(p => `<circle cx="${{p[0]}}" cy="${{p[1]}}" r="4" fill="#2563eb"><title>${{p[2]}}: ${{preciseCurrency.format(p[3])}}</title></circle>`).join("")}}
+        ${{points.filter((_, i) => i % 2 === 0 || data.length < 10).map(p => `<text x="${{p[0]}}" y="${{height - 22}}" text-anchor="middle" font-size="11" fill="#667085">${{p[2]}}</text>`).join("")}}
+      `;
+    }}
+
+    function drawBarChart(id, data, color, options = {{}}) {{
+      const svg = document.getElementById(id);
+      const width = 620, height = 330, left = 124, right = 24, top = 16, bottom = 30;
+      const chartWidth = width - left - right;
+      const barHeight = Math.min(32, (height - top - bottom) / Math.max(data.length, 1) - 8);
+      const max = Math.max(...data.map(d => d.value || d.revenue), 1);
+      svg.setAttribute("viewBox", `0 0 ${{width}} ${{height}}`);
+      svg.innerHTML = data.map((d, i) => {{
+        const value = d.value || d.revenue;
+        const y = top + i * (barHeight + 10);
+        const w = (value / max) * chartWidth;
+        const profitW = d.profit ? (d.profit / max) * chartWidth : 0;
+        return `
+          <text class="bar-label" x="${{left - 10}}" y="${{y + barHeight * .7}}" text-anchor="end">${{d.label}}</text>
+          <rect x="${{left}}" y="${{y}}" width="${{w}}" height="${{barHeight}}" rx="4" fill="${{color}}"></rect>
+          ${{options.profit ? `<rect x="${{left}}" y="${{y + barHeight * .52}}" width="${{profitW}}" height="${{barHeight * .48}}" rx="3" fill="#f59e0b"></rect>` : ""}}
+          <text x="${{left + w + 8}}" y="${{y + barHeight * .7}}" font-size="12" fill="#667085">${{currency.format(value)}}</text>
+        `;
+      }}).join("");
+    }}
+
+    function render() {{
+      const rows = filterRows();
+      const revenue = sum(rows, "Revenue");
+      const profit = sum(rows, "Profit");
+      document.getElementById("kpiRevenue").textContent = preciseCurrency.format(revenue);
+      document.getElementById("kpiProfit").textContent = preciseCurrency.format(profit);
+      document.getElementById("kpiOrders").textContent = rows.length.toLocaleString("en-US");
+      document.getElementById("kpiAov").textContent = preciseCurrency.format(rows.length ? revenue / rows.length : 0);
+      document.getElementById("kpiMargin").textContent = revenue ? `${{(profit / revenue * 100).toFixed(1)}}%` : "0.0%";
+
+      drawLineChart("trendChart", rows);
+      drawBarChart("productChart", groupBy(rows, "Product", "Revenue").slice(0, 8), "#0f766e");
+      drawBarChart("categoryChart", groupCategory(rows).map(d => ({{ label: d.label, value: d.revenue, profit: d.profit }})), "#7c3aed", {{ profit: true }});
+      drawBarChart("regionChart", groupBy(rows, "Region", "Revenue"), "#dc2626");
+
+      document.getElementById("recordRows").innerHTML = rows
+        .sort((a, b) => Number(b.Revenue) - Number(a.Revenue))
+        .slice(0, 12)
+        .map(row => `<tr><td>${{row["Order ID"]}}</td><td>${{row["Order Date"]}}</td><td>${{row.Region}}</td><td>${{row.Category}}</td><td>${{row.Product}}</td><td>${{preciseCurrency.format(row.Revenue)}}</td><td>${{preciseCurrency.format(row.Profit)}}</td></tr>`)
+        .join("");
+    }}
+
+    fillSelect("regionFilter", uniqueValues("Region"));
+    fillSelect("categoryFilter", uniqueValues("Category"));
+    fillSelect("productFilter", uniqueValues("Product"));
+    document.getElementById("startDate").value = salesData.map(row => row["Order Date"]).sort()[0];
+    document.getElementById("endDate").value = salesData.map(row => row["Order Date"]).sort().at(-1);
+    document.querySelectorAll("select, input").forEach(control => control.addEventListener("change", render));
+    render();
+  </script>
 </body>
-</html>'''
-    with open(HTML_FILE, 'w', encoding='utf-8') as fh:
-        fh.write(html)
+</html>"""
+
+    for path in (HTML_FILE, LEGACY_HTML_FILE):
+        with open(path, "w", encoding="utf-8") as file_handle:
+            file_handle.write(html)
 
 
 def main():
+    ensure_dirs()
     rows = generate_sales_data(500)
-    write_csv(rows)
-    summary_lines = summarize(rows)
-    with open(SUMMARY_FILE, 'w', encoding='utf-8') as fh:
-        fh.write('\n'.join(summary_lines))
-    build_dashboard(rows, summary_lines)
-    print('Created sales data and dashboard files.')
-    print(f'CSV: {DATA_FILE}')
-    print(f'Summary: {SUMMARY_FILE}')
-    print(f'HTML: {HTML_FILE}')
+    df = write_data_files(rows)
+    df["Order Date"] = pd.to_datetime(df["Order Date"])
+    metrics = aggregate_metrics(df)
+    summary_lines = write_summary(metrics)
+    save_chart_images(metrics)
+    build_dashboard_html(df, metrics, summary_lines)
+
+    print("Created complete sales analytics submission.")
+    print(f"CSV: {CSV_FILE}")
+    print(f"XLSX: {XLSX_FILE}")
+    print(f"Summary: {SUMMARY_FILE}")
+    print(f"HTML dashboard: {HTML_FILE}")
+    print(f"Outputs: {OUTPUTS_DIR}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
