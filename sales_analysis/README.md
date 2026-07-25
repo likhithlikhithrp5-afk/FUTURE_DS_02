@@ -14,6 +14,7 @@ Future Interns Data Science & Analytics Task 1 submission focused on cleaning sa
 - Profit by category
 - Executive business insights and actionable recommendations
 - GitHub-ready preview images for quick portfolio review
+- PDF report for offline submission review
 
 ## Key Results
 
@@ -47,6 +48,7 @@ sales_analysis/
 |   `-- dashboard_screenshot.png
 |-- analyze_sales.py
 |-- requirements.txt
+|-- report.pdf
 |-- sales_dashboard.html
 |-- sales_summary.txt
 |-- sales_data.csv
@@ -73,6 +75,12 @@ Open the standalone HTML dashboard:
 
 ```text
 dashboard/sales_dashboard.html
+```
+
+Open the PDF report:
+
+```text
+report.pdf
 ```
 
 ## Dashboard Features

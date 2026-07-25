@@ -11,6 +11,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 
 
@@ -27,6 +28,7 @@ CSV_FILE = os.path.join(DATA_DIR, "sales_data.csv")
 XLSX_FILE = os.path.join(DATA_DIR, "sales_data.xlsx")
 SUMMARY_FILE = os.path.join(BASE_DIR, "sales_summary.txt")
 HTML_FILE = os.path.join(DASHBOARD_DIR, "sales_dashboard.html")
+PDF_FILE = os.path.join(BASE_DIR, "report.pdf")
 
 REGIONS = ["North", "South", "East", "West"]
 CATEGORIES = [
@@ -378,6 +380,72 @@ def save_chart_images(metrics):
     plt.close(fig)
 
 
+def write_pdf_report(metrics, summary_lines):
+    with PdfPages(PDF_FILE) as pdf:
+        fig = plt.figure(figsize=(8.5, 11), facecolor="white")
+        fig.suptitle("Business Sales Performance Report", x=0.08, y=0.96, ha="left", fontsize=20, weight="bold")
+        fig.text(
+            0.08,
+            0.915,
+            "Future Interns Data Science & Analytics Task 1",
+            fontsize=11,
+            color="#475569",
+        )
+
+        cards = [
+            ("Total Revenue", format_currency(metrics["total_revenue"])),
+            ("Total Profit", format_currency(metrics["total_profit"])),
+            ("Orders", f"{metrics['orders']:,}"),
+            ("Average Order Value", format_currency(metrics["aov"])),
+            ("Profit Margin", f"{metrics['profit_margin']:.1%}"),
+        ]
+        y = 0.84
+        for label, value in cards:
+            fig.text(0.08, y, label, fontsize=10, color="#667085", weight="bold")
+            fig.text(0.35, y, value, fontsize=13, color="#101828", weight="bold")
+            y -= 0.04
+
+        story = "\n".join(summary_lines[summary_lines.index("Business Insights:") :])
+        fig.text(0.08, 0.62, story, fontsize=9.5, color="#344054", va="top", linespacing=1.45)
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(11, 6.5))
+        ax.plot(metrics["monthly"]["Month"], metrics["monthly"]["Revenue"], color="#2563eb", linewidth=2.8, marker="o")
+        ax.set_title("Monthly Revenue Trend", loc="left", fontsize=16, weight="bold")
+        ax.set_ylabel("Revenue")
+        ax.tick_params(axis="x", rotation=45)
+        ax.yaxis.set_major_formatter("${x:,.0f}")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        fig, axes = plt.subplots(1, 2, figsize=(11, 6.5))
+        top_products = metrics["product"].head(8).sort_values("Revenue")
+        axes[0].barh(top_products["Product"], top_products["Revenue"], color="#0f766e")
+        axes[0].set_title("Top Products by Revenue", loc="left", weight="bold")
+        axes[0].xaxis.set_major_formatter("${x:,.0f}")
+
+        category = metrics["category"].sort_values("Revenue")
+        axes[1].barh(category["Category"], category["Revenue"], color="#7c3aed", label="Revenue")
+        axes[1].barh(category["Category"], category["Profit"], color="#f59e0b", label="Profit")
+        axes[1].set_title("Revenue and Profit by Category", loc="left", weight="bold")
+        axes[1].xaxis.set_major_formatter("${x:,.0f}")
+        axes[1].legend()
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(11, 6.5))
+        region = metrics["region"].sort_values("Revenue")
+        ax.barh(region["Region"], region["Revenue"], color="#dc2626")
+        ax.set_title("Revenue by Region", loc="left", fontsize=16, weight="bold")
+        ax.xaxis.set_major_formatter("${x:,.0f}")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+
 def build_dashboard_html(df, metrics, summary_lines):
     records = df.copy()
     records["Order Date"] = records["Order Date"].dt.strftime("%Y-%m-%d")
@@ -650,6 +718,7 @@ def main():
     metrics = aggregate_metrics(df)
     summary_lines = write_summary(metrics)
     save_chart_images(metrics)
+    write_pdf_report(metrics, summary_lines)
     build_dashboard_html(df, metrics, summary_lines)
 
     print("Created complete sales analytics submission.")
@@ -657,6 +726,7 @@ def main():
     print(f"XLSX: {XLSX_FILE}")
     print(f"Summary: {SUMMARY_FILE}")
     print(f"HTML dashboard: {HTML_FILE}")
+    print(f"PDF report: {PDF_FILE}")
     print(f"Outputs: {OUTPUTS_DIR}")
 
 
