@@ -9,12 +9,14 @@ This project analyzes customer retention and churn using a synthetic but realist
 - [outputs/summary.txt](outputs/summary.txt)
 - [outputs/retention_report.md](outputs/retention_report.md)
 - [retention_analysis.py](retention_analysis.py)
+- [requirements.txt](requirements.txt)
 
 ## How to Reproduce
-Run the following command from the project folder:
+Install the Python dependencies, then run the analysis script from the project folder:
 
 ```powershell
-& "C:\Users\Admin\AppData\Local\Programs\Python\Python313\python.exe" "retention_analysis.py"
+pip install -r requirements.txt
+python retention_analysis.py
 ```
 
 ## Key Findings
